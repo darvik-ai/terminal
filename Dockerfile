@@ -1,6 +1,6 @@
 # --- Builder Stage ---
 # Use a Go 1.24 base image
-FROM golang:1.24-alpine AS builder 
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -43,13 +43,21 @@ COPY --from=builder /web-k8s-terminal /usr/local/bin/web-k8s-terminal
 # Copy the static frontend files
 COPY static ./static
 
+# Create a non-root group and user with specific UID/GID in the desired range (e.g., 10001)
+# -g specifies the GID for the group
+# -u specifies the UID for the user
+# -D creates a system user without a password/home dir (suitable for services)
+# -G assigns the user to the specified group
+ARG APP_GID=10001
+ARG APP_UID=10001
+RUN addgroup -g ${APP_GID} appgroup && \
+    adduser -D -u ${APP_UID} -G appgroup appuser
+
+# Switch to the non-root user using the numeric UID to satisfy CKV_CHOREO_1
+USER ${APP_UID}
+
 # Expose the port the application listens on
 EXPOSE 8080
-
-# Set the default user (run as non-root) - Good practice!
-# Create a non-root user and group
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-USER appuser
 
 # Run the application
 # Use bash as the default shell if available when the app starts it via PTY
