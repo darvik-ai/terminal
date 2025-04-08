@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+    <title>Web K8s Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #000; }
+        #terminal { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="terminal"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script>
+        const term = new Terminal({
+            cursorBlink: true,
+            convertEol: true // Convert \n to \r\n for PTY compatibility
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+
+        const terminalContainer = document.getElementById('terminal');
+        term.open(terminalContainer);
+
+        function fitTerminal() {
+            try {
+                 fitAddon.fit();
+                 // Send resize info to backend
+                 if (ws && ws.readyState === WebSocket.OPEN) {
+                     const dims = term.proposeDimensions();
+                     const resizePayload = JSON.stringify({
+                         type: "resize",
+                         rows: dims.rows,
+                         cols: dims.cols
+                     });
+                    // console.log("Sending resize:", resizePayload); // Debug
+                    ws.send(resizePayload);
+                 }
+            } catch (e) {
+                console.error("Error fitting terminal:", e);
+            }
+        }
+
+        // Debounce resize events
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(fitTerminal, 150); // Adjust delay as needed
+        });
+
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        let ws;
+
+        function connectWebSocket() {
+            console.log(`Connecting to WebSocket at ${wsUrl}...`);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connection opened');
+                term.writeln('\r\n\x1b[32mConnected to backend terminal.\x1b[0m');
+                // Initial fit after connection established and terminal is ready
+                setTimeout(fitTerminal, 100); // Small delay allows things to settle
+            };
+
+            ws.onmessage = (event) => {
+                // The backend sends binary data from the PTY stdout
+                 if (event.data instanceof Blob) {
+                    const reader = new FileReader();
+                    reader.onload = function() {
+                        term.write(new Uint8Array(reader.result));
+                    };
+                    reader.onerror = function(e) {
+                        console.error("FileReader error:", e);
+                    }
+                    reader.readAsArrayBuffer(event.data);
+                } else {
+                    // Fallback for potential text messages (e.g., errors)
+                    console.log("Received non-binary message:", event.data);
+                     term.write(event.data);
+                }
+            };
+
+            ws.onerror = (event) => {
+                console.error('WebSocket error:', event);
+                term.writeln(`\r\n\x1b[31mWebSocket error. Check console.\x1b[0m`);
+            };
+
+            ws.onclose = (event) => {
+                console.log('WebSocket connection closed:', event.code, event.reason);
+                term.writeln(`\r\n\x1b[31mWebSocket connection closed. Code: ${event.code}. Reason: ${event.reason || 'N/A'}\x1b[0m`);
+                term.writeln('\r\nAttempting to reconnect in 5 seconds...');
+                setTimeout(connectWebSocket, 5000); // Attempt to reconnect
+            };
+        }
+
+        // Handle terminal input
+        term.onData(data => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const inputPayload = JSON.stringify({ type: "input", data: data });
+                ws.send(inputPayload);
+            } else {
+                console.warn("WebSocket not open. Cannot send data.");
+            }
+        });
+
+        // Initial connection
+        connectWebSocket();
+
+        // Initial fit on load
+         window.onload = () => {
+             // Fit might need a slight delay after page load/WebSocket open
+            setTimeout(fitTerminal, 200);
+         };
+
+    </script>
+</body>
+</html>
