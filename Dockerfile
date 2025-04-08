@@ -43,18 +43,18 @@ COPY --from=builder /web-k8s-terminal /usr/local/bin/web-k8s-terminal
 # Copy the static frontend files
 COPY static ./static
 
-# Create a non-root group and user with specific UID/GID in the desired range (e.g., 10001)
-# -g specifies the GID for the group
-# -u specifies the UID for the user
-# -D creates a system user without a password/home dir (suitable for services)
-# -G assigns the user to the specified group
+# Define the GID/UID we want to use (still useful for the adduser/addgroup commands)
 ARG APP_GID=10001
 ARG APP_UID=10001
+
+# Create a non-root group and user with specific UID/GID in the desired range
+# Use the ARGs here for consistency in user creation
 RUN addgroup -g ${APP_GID} appgroup && \
     adduser -D -u ${APP_UID} -G appgroup appuser
 
-# Switch to the non-root user using the numeric UID to satisfy CKV_CHOREO_1
-USER ${APP_UID}
+# Switch to the non-root user using the EXPLICIT numeric UID
+# This is the most direct way to satisfy the CKV_CHOREO_1 check
+USER 10001
 
 # Expose the port the application listens on
 EXPOSE 8080
